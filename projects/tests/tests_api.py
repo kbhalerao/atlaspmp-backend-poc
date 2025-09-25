@@ -26,17 +26,18 @@ class ProjectsAPITests(APITestCase):
 
     def test_project_crud_and_scope(self):
         # create project owned by owner
-        payload = {'title': 'P1', 'description': 'd', 'owner': self.owner.id}
+        payload = {'title': 'P1', 'description': 'd', 'owner_id': self.owner.id}
         resp = self.client.post('/api/projects/', payload, format='json')
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         proj_id = resp.data['id']
         # list returns only own projects
         resp = self.client.get('/api/projects/')
-        self.assertEqual(len(resp.data), 1)
+        # paginated response
+        self.assertEqual(resp.data.get('count'), 1)
         # other user cannot see owner's project
         self.client.force_authenticate(user=self.other)
         resp = self.client.get('/api/projects/')
-        self.assertEqual(len(resp.data), 0)
+        self.assertEqual(resp.data.get('count'), 0)
         # other cannot update owner's project
         resp = self.client.patch(f'/api/projects/{proj_id}/', {'title': 'X'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
@@ -46,7 +47,7 @@ class ProjectsAPITests(APITestCase):
         p = Project.objects.create(title='P', description='d', owner=self.owner)
         # create task
         task_payload = {
-            'title': 'T1', 'description': 'td', 'owner': self.owner.id, 'project': p.id,
+            'title': 'T1', 'description': 'td', 'owner_id': self.owner.id, 'project_id': p.id,
             'assignees': [self.owner.id], 'priority': 'HIGH', 'status': 'TODO'
         }
         resp = self.client.post('/api/tasks/', task_payload, format='json')
@@ -54,7 +55,8 @@ class ProjectsAPITests(APITestCase):
         task_id = resp.data['id']
         # list tasks returns at least this task
         resp = self.client.get('/api/tasks/')
-        self.assertTrue(any(t['id'] == task_id for t in resp.data))
+        results = resp.data.get('results', resp.data)
+        self.assertTrue(any(t['id'] == task_id for t in results))
         # comment
         comment_payload = {'title': 'Note', 'description': 'ok', 'owner': self.owner.id, 'task': task_id}
         resp = self.client.post('/api/comments/', comment_payload, format='json')

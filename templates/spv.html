@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en" x-data="spvApp()">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>AtlasPMP</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            padding: 12px;
+            background: #222;
+            color: #fff;
+        }
+
+        .container {
+            padding: 12px;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 12px;
+        }
+
+        .top {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .panel {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 10px;
+        }
+
+        .messages {
+            height: 260px;
+            overflow: auto;
+            background: #fafafa;
+            border: 1px solid #eee;
+            padding: 8px;
+        }
+
+        .task-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .task-table th, .task-table td {
+            border: 1px solid #ddd;
+            padding: 6px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .row-select {
+            cursor: pointer;
+            color: #0366d6;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #eee;
+            margin-right: 4px;
+        }
+
+        .task-details {
+            margin-top: 10px;
+        }
+
+        .task-details h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .detail-row {
+            margin-bottom: 5px;
+        }
+
+        .detail-row strong {
+            display: inline-block;
+            width: 140px;
+            color: #555;
+        }
+
+        hr {
+            margin: 15px 0;
+            border: none;
+            border-top: 1px dashed #ddd;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Atlas PMP Mini PoC</h1>
+</header>
+<div class="container">
+    <div class="top">
+        <div class="panel">
+            <h2>Chat</h2>
+            <div class="controls">
+                <label><input type="checkbox" x-model="useContext"/> Use current selection as context</label>
+                <button @click="connectSSE">Connect SSE</button>
+                <button @click="disconnectSSE">Disconnect SSE</button>
+            </div>
+            <div class="messages" x-ref="messages">
+                <template x-for="m in messages" :key="m.id">
+                    <div><strong x-text="m.role"></strong>: <span x-text="m.content"></span></div>
+                </template>
+            </div>
+            <div style="margin-top: 8px; display:flex; gap: 8px;">
+                <input x-model="input" @keydown.enter="send" placeholder="Type a message..."
+                       style="flex:1; padding:6px;"/>
+                <button @click="send">Send</button>
+            </div>
+        </div>
+        <div class="panel">
+            <template x-if="selection">
+                <div>
+                    <h3>
+                        <span x-text="selection.type"></span>
+                        #<span x-text="selection.task?.id || selection.id"></span>
+                    </h3>
+                    <template x-if="selection.type === 'task' && selection.task">
+                        <div class="task-details">
+                            <h4 x-text="selection.task.title"></h4>
+                            <div class="detail-row">
+                                <strong>Description:</strong> <span x-text="selection.task.description"></span>
+                            </div>
+                            <div class="detail-row">
+                                <strong>Status:</strong>
+                                <span class="badge"
+                                      x-text="selection.task.status"
+                                      :style="`background-color: ${selection.task.status === 'DONE' ? '#d4edda' : 
+                                                             selection.task.status === 'IN_PROGRESS' ? '#fff3cd' : 
+                                                             selection.task.status === 'REVIEW' ? '#cce5ff' : '#f8f9fa'}`">
+                                </span>
+                            </div>
+                            <div class="detail-row">
+                                <strong>Priority:</strong>
+                                <span class="badge"
+                                      x-text="selection.task.priority"
+                                      :style="`background-color: ${selection.task.priority === 'URGENT' ? '#f8d7da' : 
+                                                             selection.task.priority === 'HIGH' ? '#fff3cd' : 
+                                                             selection.task.priority === 'MEDIUM' ? '#d1ecf1' : '#d4edda'}`">
+                                </span>
+                            </div>
+                            <div class="detail-row" x-show="selection.task.due_date">
+                                <strong>Due date:</strong> <span x-text="selection.task.due_date"></span>
+                            </div>
+                            <div class="detail-row" x-show="selection.task.estimated_hours">
+                                <strong>Estimated hours:</strong> <span x-text="selection.task.estimated_hours"></span>
+                            </div>
+                            <div class="detail-row">
+                                <strong>Owner:</strong> <span x-text="selection.task.owner.email"></span>
+                            </div>
+                            <div class="detail-row"
+                                 x-show="selection.task.assignees && selection.task.assignees.length">
+                                <strong>Assignees:</strong>
+                                <template x-for="assignee in selection.task.assignees" :key="assignee.id">
+                                    <span class="badge" x-text="assignee.email"></span>
+                                </template>
+                            </div>
+                            <div class="detail-row"
+                                 x-show="!selection.task.assignees || selection.task.assignees.length === 0">
+                                <strong>Assignees:</strong> <span>None</span>
+                            </div>
+                            <div class="detail-row" x-show="selection.task.tags && selection.task.tags.length">
+                                <strong>Tags:</strong>
+                                <template x-for="tag in selection.task.tags" :key="tag">
+                                    <span class="badge" x-text="tag"></span>
+                                </template>
+                            </div>
+                            <hr/>
+                            <div class="detail-row">
+                                <strong>Project:</strong> <span x-text="selection.task.project.title"></span>
+                            </div>
+                            <div class="detail-row">
+                                <strong>Project description:</strong> <span
+                                    x-text="selection.task.project.description"></span>
+                            </div>
+                            <div class="detail-row" x-show="selection.task.project.category">
+                                <strong>Category:</strong> <span x-text="selection.task.project.category"></span>
+                            </div>
+                            <div class="detail-row" x-show="selection.task.project.deadline">
+                                <strong>Project deadline:</strong> <span
+                                    x-text="selection.task.project.deadline"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+            <template x-if="!selection">
+                <div>No selection</div>
+            </template>
+            <template x-if="lastMeta">
+                <div style="margin-top:10px;">
+                    <div><strong>Last action:</strong> <span x-text="lastMeta.last_action"></span></div>
+                    <div><strong>Changed:</strong> <span x-text="lastMeta.changed"></span></div>
+                </div>
+            </template>
+        </div>
+    </div>
+    <div class="panel">
+        <h2>Tasks</h2>
+        <div class="controls">
+            <input x-model="filters.q" placeholder="Search title/description" @input.debounce.400="fetchTasks"/>
+            <select x-model="filters.status" @change="fetchTasks">
+                <option value="">Any Status</option>
+                <option>TODO</option>
+                <option>IN_PROGRESS</option>
+                <option>REVIEW</option>
+                <option>DONE</option>
+            </select>
+            <select x-model="filters.priority" @change="fetchTasks">
+                <option value="">Any Priority</option>
+                <option>LOW</option>
+                <option>MEDIUM</option>
+                <option>HIGH</option>
+                <option>URGENT</option>
+            </select>
+            <label><input type="checkbox" x-model="filters.mine" @change="fetchTasks"/> Mine</label>
+            <label><input type="checkbox" x-model="filters.include_assigned" @change="fetchTasks"/> Include
+                Assigned</label>
+        </div>
+        <table class="task-table">
+            <thead>
+            <tr>
+                <th>Task</th>
+                <th>Project</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody>
+            <template x-for="t in tasks" :key="t.id">
+                <tr>
+                    <td x-text="t.title"></td>
+                    <td x-text="t.project.title"></td>
+                    <td x-text="t.priority"></td>
+                    <td x-text="t.status"></td>
+                    <td><span class="row-select" @click="selectTask(t)">Select</span></td>
+                </tr>
+            </template>
+            </tbody>
+        </table>
+    </div>
+</div>
+<script>
+    function spvApp() {
+        return {
+            input: '',
+            messages: [],
+            tasks: [],
+            selection: null,
+            useContext: true,
+            lastMeta: null,
+            sse: null,
+            sseConnected: false,
+            filters: {q: '', status: '', priority: '', mine: false, include_assigned: true},
+
+            // Utility to get CSRF cookie
+            getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        // Does this cookie string begin with the name we want?
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            },
+
+            async init() {
+                this.fetchTasks();
+            },
+
+            selectTask(t) {
+                this.selection = {type: 'task', id: t.id, task: t};
+                console.log('Selected task', this.selection);
+            },
+
+            async fetchTasks() {
+                const params = new URLSearchParams();
+                if (this.filters.q) params.set('q', this.filters.q);
+                if (this.filters.status) params.set('status', this.filters.status);
+                if (this.filters.priority) params.set('priority', this.filters.priority);
+                if (this.filters.mine) params.set('mine', 'true');
+                if (!this.filters.include_assigned) params.set('include_assigned', 'false');
+                const r = await fetch(`/api/tasks/?${params.toString()}`);
+                const data = await r.json();
+                this.tasks = Array.isArray(data) ? data : data.results;
+            },
+
+            async send() {
+                const csrf = "{{ csrf_token }}";
+                if (!this.input.trim()) return;
+                this.messages.push({id: Date.now() + '-u', role: 'user', content: this.input});
+                const payload = {
+                    message: this.input,
+                    context: this.useContext && this.selection ? {
+                        type: this.selection.type,
+                        id: this.selection.id
+                    } : {type: 'none'},
+                    options: {simulate_change: true, last_action: 'update'} // test-friendly default
+                };
+                const r = await fetch('/api/agent/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+                    body: JSON.stringify(payload)
+                });
+                const data = await r.json();
+                this.messages.push({id: Date.now() + '-a', role: 'assistant', content: JSON.stringify(data.result)});
+                this.lastMeta = data.meta;
+                if (this.lastMeta && this.lastMeta.changed) {
+                    this.fetchTasks();
+                }
+                this.input = '';
+                this.$nextTick(() => this.$refs.messages.scrollTop = this.$refs.messages.scrollHeight);
+            },
+
+            connectSSE() {
+                if (this.sse) return;
+
+                // Get the CSRF token from cookie if it exists
+                const csrftoken = this.getCookie('csrftoken');
+
+                // Create EventSource with appropriate headers
+                const eventSourceInitDict = {
+                    headers: {
+                        'Accept': 'text/event-stream',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                };
+
+                // Add CSRF token if available
+                if (csrftoken) {
+                    eventSourceInitDict.headers['X-CSRFToken'] = csrftoken;
+                }
+
+                try {
+                    this.sse = new EventSource('/api/agent/chat/stream', eventSourceInitDict);
+
+                    // Add error handler
+                    this.sse.onerror = (e) => {
+                        console.error('SSE connection error:', e);
+                        this.messages.push({id: Date.now(), role: 'system', content: 'Error connecting to event stream'});
+                        this.disconnectSSE();
+                    };
+
+                    // Add event listeners
+                    this.sse.addEventListener('hello', (e) => {
+                        this.messages.push({id: Date.now(), role: 'assistant', content: 'SSE hello ' + e.data});
+                    });
+
+                    this.sse.addEventListener('progress', (e) => {
+                        this.messages.push({id: Date.now(), role: 'assistant', content: 'progress ' + e.data});
+                    });
+
+                    this.sse.addEventListener('done', (e) => {
+                        this.messages.push({id: Date.now(), role: 'assistant', content: 'done'});
+                    });
+
+                    console.log('SSE connection established');
+                } catch (error) {
+                    console.error('Failed to establish SSE connection:', error);
+                    this.messages.push({id: Date.now(), role: 'system', content: 'Failed to connect: ' + error.message});
+                }
+            },
+            disconnectSSE() {
+                if (this.sse) {
+                    this.sse.close();
+                    this.sse = null;
+                }
+            }
+        }
+    }
+</script>
+</body>
+</html>

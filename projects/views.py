@@ -1,6 +1,13 @@
 from rest_framework import viewsets, permissions
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from django.http import StreamingHttpResponse
 from django.db.models import Q
+from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
+import json
+import time
 
 from .models import Project, Task, Tag, Comment
 from .serializers import ProjectSerializer, TaskSerializer, TagSerializer, CommentSerializer
@@ -35,12 +42,72 @@ class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
 
+    # allow safe, whitelisted ordering fields
+    ALLOWED_ORDERING = {'id', 'title', 'created', 'updated', 'due_date', 'priority', 'status'}
+
     def get_queryset(self):
-        user = self.request.user
-        if user.is_staff:
-            return Task.objects.all().order_by('id')
-        # tasks owned by user or assigned to user
-        return Task.objects.filter(Q(owner=user) | Q(assignees=user)).distinct().order_by('id')
+        request = self.request
+        user = request.user
+        qs = Task.objects.all()
+        # permission scoping
+        if not user.is_staff:
+            qs = qs.filter(Q(owner=user) | Q(assignees=user)).distinct()
+
+        # filters
+        q = request.query_params.get('q')
+        if q:
+            qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q) | Q(tags__name__icontains=q) | Q(
+                project__title__icontains=q))
+
+        status_f = request.query_params.get('status')
+        if status_f:
+            qs = qs.filter(status=status_f)
+
+        priority_f = request.query_params.get('priority')
+        if priority_f:
+            qs = qs.filter(priority=priority_f)
+
+        project = request.query_params.get('project')
+        if project:
+            qs = qs.filter(project_id=project)
+
+        tag = request.query_params.get('tag')
+        if tag:
+            try:
+                tag_id = int(tag)
+                qs = qs.filter(tags__id=tag_id)
+            except ValueError:
+                qs = qs.filter(tags__name=tag)
+
+        assigned = request.query_params.get('assigned')
+        if assigned:
+            try:
+                assigned_id = int(assigned)
+                qs = qs.filter(assignees__id=assigned_id)
+            except ValueError:
+                qs = qs.none()
+
+        mine = request.query_params.get('mine')
+        if mine and mine.lower() in {'1', 'true', 'yes'}:
+            qs = qs.filter(owner=user)
+
+        include_assigned = request.query_params.get('include_assigned')
+        if include_assigned and include_assigned.lower() in {'0', 'false', 'no'}:
+            # if false, restrict to owner-only view regardless of staff flag (still harmless for staff)
+            qs = qs.filter(owner=user)
+
+        # ordering
+        ordering = request.query_params.get('ordering') or 'id'
+        if ordering:
+            raw = ordering
+            desc = raw.startswith('-')
+            field = raw[1:] if desc else raw
+            if field in self.ALLOWED_ORDERING:
+                qs = qs.order_by(raw)
+            else:
+                qs = qs.order_by('id')
+
+        return qs
 
 
 class CommentViewSet(viewsets.ModelViewSet):
@@ -53,3 +120,87 @@ class CommentViewSet(viewsets.ModelViewSet):
             return Comment.objects.all().order_by('id')
         return Comment.objects.filter(owner=user).order_by('id')
 
+
+class AgentChatView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Parse body
+        body = request.data or {}
+        message = body.get('message', '')
+        context = body.get('context', {}) or {}
+        options = body.get('options', {}) or {}
+
+        # Build a concise context snapshot (without hitting the LLM yet)
+        ctx_type = context.get('type', 'none')
+        ctx_id = context.get('id')
+        ctx_summary = None
+        if ctx_type == 'task' and ctx_id:
+            try:
+                t = Task.objects.get(id=ctx_id)
+                # minimal snapshot for tests
+                ctx_summary = {
+                    'type': 'task',
+                    'id': t.id,
+                    'title': t.title,
+                    'project_id': t.project_id,
+                }
+            except Task.DoesNotExist:
+                ctx_summary = {'type': 'task', 'id': ctx_id, 'missing': True}
+        elif ctx_type == 'project' and ctx_id:
+            try:
+                p = Project.objects.get(id=ctx_id)
+                ctx_summary = {
+                    'type': 'project',
+                    'id': p.id,
+                    'title': p.title,
+                }
+            except Project.DoesNotExist:
+                ctx_summary = {'type': 'project', 'id': ctx_id, 'missing': True}
+        else:
+            ctx_summary = {'type': 'none'}
+
+        # Test-friendly meta: allow toggling change via options
+        simulate_change = bool(options.get('simulate_change'))
+        last_action = options.get('last_action') if simulate_change else None
+
+        response = {
+            'messages': [
+                {'role': 'user', 'content': message},
+                {'role': 'assistant', 'content': 'Acknowledged'}
+            ],
+            'tool_calls': [],
+            'result': {'echo': True, 'context': ctx_summary},
+            'meta': {
+                'changed': simulate_change,
+                'last_action': last_action,
+                'user_id': getattr(request.user, 'id', None),
+            }
+        }
+        return Response(response)
+
+
+class AgentChatStreamView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Build an SSE stream that sends a few events and closes
+        def event_stream():
+            # event: hello
+            yield f"event: hello\n"
+            yield f"data: {json.dumps({'user_id': getattr(request.user, 'id', None)})}\n\n"
+            time.sleep(0.01)
+            # event: progress
+            yield f"event: progress\n"
+            yield f"data: {json.dumps({'stage': 'processing'})}\n\n"
+            time.sleep(0.01)
+            # event: done
+            yield f"event: done\n"
+            yield f"data: {json.dumps({'ok': True})}\n\n"
+
+        return StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+
+
+@login_required
+def spv_view(request):
+    return render(request, 'spv.html')

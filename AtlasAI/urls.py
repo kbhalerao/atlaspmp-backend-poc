@@ -28,7 +28,12 @@ router.register(r'tasks', TaskViewSet, basename='task')
 router.register(r'tags', TagViewSet, basename='tag')
 router.register(r'comments', CommentViewSet, basename='comment')
 
+from projects.views import AgentChatView, AgentChatStreamView, spv_view
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/agent/chat', AgentChatView.as_view(), name='agent-chat'),
+    path('api/agent/chat/stream', AgentChatStreamView.as_view(), name='agent-chat-stream'),
+    path('spv/', spv_view, name='spv'),
 ]
