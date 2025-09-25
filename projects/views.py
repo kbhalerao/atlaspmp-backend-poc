@@ -177,7 +177,7 @@ class AgentChatView(APIView):
         prompt = (f"Respond to the request using optional context and previous messages. "
                   f"\n\n{ctx_summary}")
 
-        agent = orm_agent_factory(user=request.user)
+        agent = agent_factory(user=request.user)
         response = agent.run_sync(prompt, message_history=previous_messages)
         return Response(response.output)
 

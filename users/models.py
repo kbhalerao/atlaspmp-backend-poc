@@ -24,6 +24,10 @@ class CustomUserManager(BaseUserManager):
             raise ValueError(_('Superuser must have is_superuser=True.'))
         return self.create_user(email, password, **extra_fields)
 
+    def delete(self):
+        return self.update(is_active=False)
+
+
 
 class CustomUser(AbstractUser):
     username = None
@@ -36,3 +40,7 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    def delete(self, *args, **kwargs):
+        self.is_active = False
+        self.save()
