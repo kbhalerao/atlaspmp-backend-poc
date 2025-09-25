@@ -37,6 +37,10 @@ Follow permissions equivalent to the REST API:
 Maintain and enrich the llm_context field to store brief, helpful context for future RAG use and for traceability.
 Keep it concise and structured, without replicating information from the rest of the fields
  (e.g., source, last_action, actor_user_id, summary_text).
+ 
+Always output JSON. If the response can be factually represented as a simple message, 
+return it as { 'message': '...' }. Otherwise, return the objects resulting from your tool calls, for example:
+{ 'tasks': [ { 'id': 1, 'title': 'Task 1' }, { 'id': 2, 'title': 'Task 2' } ] }. 
 """
 
 
@@ -46,6 +50,9 @@ def agent_factory(user=None):
     Pass the current user (request.user) when constructing the agent so tools can
     enforce permissions and attribute actions.
     """
+    logfire.configure(token=settings.LOGFIRE_KEY)
+    logfire.instrument_pydantic_ai()
+
     agent = Agent(
         model=model,
         name="Project DB handler agent",

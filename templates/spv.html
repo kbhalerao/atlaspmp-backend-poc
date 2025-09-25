@@ -39,7 +39,7 @@
 
         .messages {
             height: 260px;
-            overflow: auto;
+            overflow: scroll;
             background: #fafafa;
             border: 1px solid #eee;
             padding: 8px;
@@ -117,7 +117,23 @@
             </div>
             <div class="messages" x-ref="messages">
                 <template x-for="m in messages" :key="m.id">
-                    <div><strong x-text="m.role"></strong>: <span x-text="m.content"></span></div>
+                    <div>
+                        <template x-if="m.role === 'assistant'">
+                            <div>
+                                <template x-if="m.type === 'string'">
+                                    <div x-text="m.content"></div>
+                                </template>
+                                <template x-if="m.type === 'object'">
+                                    <pre x-text="m.content"></pre>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="m.role !== 'assistant'">
+                            <div>
+                                <strong>{{ request.user }}</strong>: <span x-text="m.content"></span>
+                            </div>
+                        </template>
+                    </div>
                 </template>
             </div>
             <div style="margin-top: 8px; display:flex; gap: 8px;">
@@ -320,7 +336,7 @@
                         type: this.selection.type,
                         id: this.selection.id
                     } : {type: 'none'},
-                    options: {simulate_change: true, last_action: 'update'} // test-friendly default
+                    options: {simulate_change: false, last_action: 'update'} // test-friendly default
                 };
                 const r = await fetch('/api/agent/chat', {
                     method: 'POST',
@@ -328,7 +344,21 @@
                     body: JSON.stringify(payload)
                 });
                 const data = await r.json();
-                this.messages.push({id: Date.now() + '-a', role: 'assistant', content: JSON.stringify(data.result)});
+                if (data.message) {
+                    this.messages.push({
+                        id: Date.now() + '-a',
+                        role: 'assistant',
+                        content: data.message,
+                        type: 'string'
+                    });
+                } else {
+                    this.messages.push({
+                        id: Date.now() + '-a',
+                        role: 'assistant',
+                        content: JSON.stringify(data, null, 2),
+                        type: 'object'
+                    });
+                }
                 this.lastMeta = data.meta;
                 if (this.lastMeta && this.lastMeta.changed) {
                     this.fetchTasks();
@@ -362,7 +392,11 @@
                     // Add error handler
                     this.sse.onerror = (e) => {
                         console.error('SSE connection error:', e);
-                        this.messages.push({id: Date.now(), role: 'system', content: 'Error connecting to event stream'});
+                        this.messages.push({
+                            id: Date.now(),
+                            role: 'system',
+                            content: 'Error connecting to event stream'
+                        });
                         this.disconnectSSE();
                     };
 
@@ -382,7 +416,11 @@
                     console.log('SSE connection established');
                 } catch (error) {
                     console.error('Failed to establish SSE connection:', error);
-                    this.messages.push({id: Date.now(), role: 'system', content: 'Failed to connect: ' + error.message});
+                    this.messages.push({
+                        id: Date.now(),
+                        role: 'system',
+                        content: 'Failed to connect: ' + error.message
+                    });
                 }
             },
             disconnectSSE() {

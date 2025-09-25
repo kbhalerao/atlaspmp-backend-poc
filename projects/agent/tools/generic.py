@@ -17,6 +17,7 @@ ALLOWED_MODELS = {
     'task': Task, 
     'tag': Tag,
     'comment': Comment,
+    'user': User,
 }
 
 class ModelAction(BaseModel):
@@ -87,7 +88,11 @@ def serialize_instance(instance: models.Model) -> Dict[str, Any]:
     for field in instance._meta.get_fields():
         if field.is_relation:
             if field.many_to_many:
-                data[f"{field.name}_ids"] = list(getattr(instance, field.name).values_list('id', flat=True))
+                try:
+                    data[f"{field.name}_ids"] = list(getattr(instance, field.name).values_list('id', flat=True))
+                except AttributeError as e:
+                    data[f"{field.name}_ids"] = [str(e)]
+
             elif field.many_to_one:
                 related_id = getattr(instance, f"{field.name}_id", None)
                 if related_id:

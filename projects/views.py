@@ -9,6 +9,7 @@ from django.contrib.auth.decorators import login_required
 import json
 import time
 
+from .agent.agent import orm_agent_factory, agent_factory
 from .models import Project, Task, Tag, Comment
 from .serializers import ProjectSerializer, TaskSerializer, TagSerializer, CommentSerializer
 
@@ -128,56 +129,57 @@ class AgentChatView(APIView):
         # Parse body
         body = request.data or {}
         message = body.get('message', '')
+        previous_messages = body.get('previous_messages', [])
         context = body.get('context', {}) or {}
         options = body.get('options', {}) or {}
 
         # Build a concise context snapshot (without hitting the LLM yet)
         ctx_type = context.get('type', 'none')
         ctx_id = context.get('id')
-        ctx_summary = None
         if ctx_type == 'task' and ctx_id:
             try:
                 t = Task.objects.get(id=ctx_id)
                 # minimal snapshot for tests
-                ctx_summary = {
-                    'type': 'task',
-                    'id': t.id,
-                    'title': t.title,
-                    'project_id': t.project_id,
-                }
+                ctx_summary = TaskSerializer(t).data
             except Task.DoesNotExist:
                 ctx_summary = {'type': 'task', 'id': ctx_id, 'missing': True}
         elif ctx_type == 'project' and ctx_id:
             try:
                 p = Project.objects.get(id=ctx_id)
-                ctx_summary = {
-                    'type': 'project',
-                    'id': p.id,
-                    'title': p.title,
-                }
+                ctx_summary = ProjectSerializer(p).data
             except Project.DoesNotExist:
                 ctx_summary = {'type': 'project', 'id': ctx_id, 'missing': True}
         else:
             ctx_summary = {'type': 'none'}
 
+        ctx_summary['request'] = message
+
         # Test-friendly meta: allow toggling change via options
         simulate_change = bool(options.get('simulate_change'))
         last_action = options.get('last_action') if simulate_change else None
 
-        response = {
-            'messages': [
-                {'role': 'user', 'content': message},
-                {'role': 'assistant', 'content': 'Acknowledged'}
-            ],
-            'tool_calls': [],
-            'result': {'echo': True, 'context': ctx_summary},
-            'meta': {
-                'changed': simulate_change,
-                'last_action': last_action,
-                'user_id': getattr(request.user, 'id', None),
+        if simulate_change:
+            response = {
+                'messages': [
+                    {'role': 'user', 'content': message},
+                    {'role': 'assistant', 'content': 'Acknowledged'}
+                ],
+                'tool_calls': [],
+                'result': {'echo': True, 'context': ctx_summary},
+                'meta': {
+                    'changed': simulate_change,
+                    'last_action': last_action,
+                    'user_id': getattr(request.user, 'id', None),
+                }
             }
-        }
-        return Response(response)
+            return Response(response)
+
+        prompt = (f"Respond to the request using optional context and previous messages. "
+                  f"\n\n{ctx_summary}")
+
+        agent = agent_factory(user=request.user)
+        response = agent.run_sync(prompt, message_history=previous_messages)
+        return Response(response.output)
 
 
 class AgentChatStreamView(APIView):
