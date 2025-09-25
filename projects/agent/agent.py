@@ -179,7 +179,11 @@ def orm_agent_factory(user=None):
         - Query instances: Use orm_action with model_name and optional filters
         
         Always specify the model_name in lowercase (e.g., "project", "task").
-""",
+        Always output JSON. If the response can be factually represented as a simple message, 
+        return it as { 'message': '...' }. 
+        Otherwise, return the objects resulting from your tool calls, for example:
+        { 'tasks': [ { 'id': 1, 'title': 'Task 1' }, { 'id': 2, 'title': 'Task 2' } ] }. 
+        """,
         output_type=dict,
     )
     
