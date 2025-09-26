@@ -32,6 +32,11 @@ ALLOWED_HOSTS = [
     "atlas.agsci.com"
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://atlas.agsci.com",
+    "http://atlas.home.arpa:8000",
+    "http://127.0.0.1:8000",
+]
 
 # Application definition
 
