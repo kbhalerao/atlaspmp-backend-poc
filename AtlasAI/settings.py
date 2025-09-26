@@ -26,7 +26,11 @@ SECRET_KEY = 'django-insecure-_6)xfv7eohc7vwtc*hj!nh&30grn=(ssd*y(5=c-9%%m$bwrh*
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "atlas.home.arpa",
+    "localhost",
+    "atlas.agsci.com"
+]
 
 
 # Application definition
